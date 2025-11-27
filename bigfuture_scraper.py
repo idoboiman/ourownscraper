@@ -270,7 +270,62 @@ class BigFutureScraper:
             return None
     
     def _extract_amount(self, driver: webdriver.Chrome) -> Optional[str]:
-        """Extract scholarship amount"""
+        """Extract scholarship amount using CSS class sc-d233e5e8-0"""
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        
+        # Prefer CSS class selector
+        selectors = [
+            (By.CSS_SELECTOR, '.sc-d233e5e8-0'),
+            (By.CSS_SELECTOR, '[class*="sc-d233e5e8-0"]'),
+            (By.XPATH, '//*[@class="sc-d233e5e8-0"]'),
+            (By.XPATH, '//*[contains(@class, "sc-d233e5e8-0")]'),
+        ]
+        
+        # Try with an explicit wait first
+        for by, selector in selectors:
+            try:
+                elem = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((by, selector))
+                )
+                amount_text = elem.text.strip()
+                if amount_text:
+                    # Extract dollar amount if present
+                    amount_match = re.search(r'\$[\d,]+', amount_text)
+                    if amount_match:
+                        return amount_match.group()
+                    return amount_text
+            except:
+                continue
+        
+        # Fallback: try without wait
+        for by, selector in selectors:
+            try:
+                elem = driver.find_element(by, selector)
+                amount_text = elem.text.strip()
+                if amount_text:
+                    # Extract dollar amount if present
+                    amount_match = re.search(r'\$[\d,]+', amount_text)
+                    if amount_match:
+                        return amount_match.group()
+                    return amount_text
+            except:
+                continue
+        
+        # Last resort: try find_elements
+        try:
+            elements = driver.find_elements(By.CSS_SELECTOR, '[class*="sc-d233e5e8-0"]')
+            for elem in elements:
+                amount_text = elem.text.strip()
+                if amount_text:
+                    amount_match = re.search(r'\$[\d,]+', amount_text)
+                    if amount_match:
+                        return amount_match.group()
+                    return amount_text
+        except:
+            pass
+        
+        # Final fallback: old method
         try:
             amount_elem = driver.find_element(By.XPATH, "//*[contains(text(), '$')]")
             amount_text = amount_elem.text.strip()
@@ -790,7 +845,8 @@ ScholarshipDetailScraper = BigFutureScraper
 if __name__ == '__main__':
     import sys
     
-    test_url = "https://bigfuture.collegeboard.org/scholarships/rotc-scholarship"
+    ##test_url = "https://bigfuture.collegeboard.org/scholarships/rotc-scholarship"
+    test_url = "https://bigfuture.collegeboard.org/scholarships/2gen-parent-scholarship"
     if len(sys.argv) > 1:
         test_url = sys.argv[1]
     

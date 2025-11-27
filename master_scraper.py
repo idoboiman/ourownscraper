@@ -13,12 +13,13 @@ from scholarship_detail_scraper import ScholarshipDetailScraper
 
 
 class MasterScraper:
-    def __init__(self, scholarships_csv='scholarships.csv', queue_csv='scholarship_queue.csv', output_dir='scholarships'):
+    def __init__(self, scholarships_csv='scholarships.csv', queue_csv='scholarship_queue.csv', output_dir='scholarships', max_retries=3):
         self.scholarships_csv = scholarships_csv
         self.queue_csv = queue_csv
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
         self.scraper = ScholarshipDetailScraper()
+        self.max_retries = max_retries
         
     def generate_filename(self, scholarship_name, url):
         """Generate a safe filename from scholarship name or URL"""
@@ -180,6 +181,7 @@ class MasterScraper:
         # Process scholarships
         processed = 0
         failed = 0
+        skipped = []
         
         while True:
             # Get next unscraped scholarship
@@ -201,57 +203,75 @@ class MasterScraper:
             print(f"    URL: {url}")
             print(f"    Remaining in queue: {remaining}")
             
-            try:
-                # Check again before scraping (safety check)
-                if self.is_scraped(name, url, verbose=False):
-                    print(f"    [SKIP] Already exists, skipping scrape...")
-                    self.update_queue(url, is_scraped=True)
-                    processed += 1
-                    continue
-                
-                print(f"    [SCRAPE] Starting scrape...")
-                # Scrape the scholarship
-                scholarship_data = self.scraper.scrape_scholarship(url, use_selenium=True)
-                
-                if scholarship_data and scholarship_data.get('name'):
-                    print(f"    [SAVE] Saving to JSON file...")
-                    # Save to JSON
-                    filepath = self.save_scholarship_json(scholarship_data, name, url)
-                    
-                    # Verify file was created
-                    if filepath.exists():
-                        print(f"    [VERIFY] File created: {filepath.name} ({filepath.stat().st_size} bytes)")
-                    else:
-                        print(f"    [ERROR] File was not created!")
-                    
-                    # Update queue
-                    self.update_queue(url, is_scraped=True)
-                    
-                    print(f"    ✓ Successfully scraped and saved to {filepath.name}")
-                    processed += 1
-                else:
-                    print(f"    ✗ Failed: No data returned from scraper")
-                    failed += 1
-                    # Don't mark as scraped if it failed
-                    
-            except Exception as e:
-                print(f"    ✗ Error: {str(e)}")
-                import traceback
-                print(f"    [TRACEBACK] {traceback.format_exc()}")
-                failed += 1
-                # Don't mark as scraped if it failed
+            # Check again before scraping (safety check)
+            if self.is_scraped(name, url, verbose=False):
+                print(f"    [SKIP] Already exists, skipping scrape...")
+                self.update_queue(url, is_scraped=True)
+                processed += 1
+                continue
             
-            # Wait before next request
-            if remaining > 1:  # Don't wait after the last one
-                print(f"    Waiting {delay} seconds before next request...")
+            success = False
+            last_error = None
+            
+            for attempt in range(1, self.max_retries + 1):
+                print(f"    [SCRAPE] Attempt {attempt}/{self.max_retries}...")
+                try:
+                    scholarship_data = self.scraper.scrape_scholarship(url, use_selenium=True)
+                    
+                    if scholarship_data and scholarship_data.get('name'):
+                        print(f"    [SAVE] Saving to JSON file...")
+                        filepath = self.save_scholarship_json(scholarship_data, name, url)
+                        
+                        if filepath.exists():
+                            print(f"    [VERIFY] File created: {filepath.name} ({filepath.stat().st_size} bytes)")
+                        else:
+                            print(f"    [ERROR] File was not created!")
+                        
+                        self.update_queue(url, is_scraped=True)
+                        print(f"    ✓ Successfully scraped and saved to {filepath.name}")
+                        processed += 1
+                        success = True
+                        break
+                    else:
+                        last_error = "No data returned from scraper"
+                        print(f"    ✗ Attempt {attempt} failed: {last_error}")
+                except Exception as e:
+                    last_error = str(e)
+                    import traceback
+                    print(f"    ✗ Attempt {attempt} error: {last_error}")
+                    print(f"    [TRACEBACK] {traceback.format_exc()}")
+                
+                if attempt < self.max_retries:
+                    print(f"    [RETRY] Waiting {delay} seconds before retry...")
+                    time.sleep(delay)
+            
+            if not success:
+                failed += 1
+                skipped.append({
+                    'name': name,
+                    'url': url,
+                    'reason': last_error or 'Unknown error'
+                })
+                print(f"    ✗ All {self.max_retries} attempts failed. Moving on.")
+            
+            # Wait before next scholarship (only if success or finished retries)
+            if remaining > 1:
+                print(f"    Waiting {delay} seconds before next scholarship...")
                 time.sleep(delay)
             
             print()
         
         print(f"\nScraping complete!")
         print(f"  Processed: {processed}")
-        print(f"  Failed: {failed}")
-        print(f"  Total: {processed + failed}")
+        print(f"  Failed (skipped): {failed}")
+        print(f"  Total attempted: {processed + failed}")
+        
+        if skipped:
+            print("\nSkipped scholarships after retries:")
+            for item in skipped:
+                print(f"  - {item['name'][:60]} ({item['url']}) -> {item['reason']}")
+        else:
+            print("\nNo scholarships were skipped!")
 
 
 if __name__ == '__main__':
@@ -259,12 +279,20 @@ if __name__ == '__main__':
     
     # Parse command line arguments
     delay = 1.0
+    max_retries = 3
+    
     if len(sys.argv) > 1:
         try:
             delay = float(sys.argv[1])
         except ValueError:
             print(f"Invalid delay value: {sys.argv[1]}. Using default: 1.0 seconds")
     
-    scraper = MasterScraper()
+    if len(sys.argv) > 2:
+        try:
+            max_retries = int(sys.argv[2])
+        except ValueError:
+            print(f"Invalid max_retries value: {sys.argv[2]}. Using default: 3 attempts")
+    
+    scraper = MasterScraper(max_retries=max_retries)
     scraper.run(delay=delay)
 
