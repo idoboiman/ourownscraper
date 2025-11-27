@@ -217,12 +217,56 @@ class BigFutureScraper:
         return None
     
     def _extract_status(self, driver: webdriver.Chrome) -> Optional[str]:
-        """Extract application status"""
+        """
+        Extract application status.
+        
+        On BigFuture, the status text (e.g. "Accepting Applications")
+        is rendered in an element with CSS class sc-c64e2d48-10.
+        We'll search by that class (any tag) and fall back to a
+        text-based search if needed.
+        """
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+
+        # Prefer CSS class selector so we're resilient to tag changes
+        selectors = [
+            (By.CSS_SELECTOR, '.sc-c64e2d48-10'),
+            (By.CSS_SELECTOR, '[class*="sc-c64e2d48-10"]'),
+            (By.XPATH, '//*[@class="sc-c64e2d48-10"]'),
+            (By.XPATH, '//*[contains(@class, "sc-c64e2d48-10")]'),
+        ]
+
+        # Try with an explicit wait first
+        for by, selector in selectors:
+            try:
+                elem = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((by, selector))
+                )
+                text = elem.text.strip()
+                if text:
+                    return text
+            except Exception:
+                continue
+
+        # Fallback: direct find without wait
+        for by, selector in selectors:
+            try:
+                elem = driver.find_element(by, selector)
+                text = elem.text.strip()
+                if text:
+                    return text
+            except Exception:
+                continue
+
+        # Final fallback: old text-based search
         try:
-            status_elem = driver.find_element(By.XPATH, 
-                "//*[contains(text(), 'Accepting Applications') or contains(text(), 'Not Accepting')]")
+            status_elem = driver.find_element(
+                By.XPATH,
+                "//*[contains(text(), 'Accepting Applications') or "
+                "contains(text(), 'Not Accepting')]",
+            )
             return status_elem.text.strip()
-        except:
+        except Exception:
             return None
     
     def _extract_amount(self, driver: webdriver.Chrome) -> Optional[str]:
