@@ -15,6 +15,11 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
 
+class PageNotFoundError(Exception):
+    """Exception raised when a scholarship page doesn't exist"""
+    pass
+
+
 class BigFutureScraper:
     """Scraper specifically designed for BigFuture scholarship pages"""
     
@@ -796,6 +801,25 @@ class BigFutureScraper:
         
         return urls
     
+    def _check_page_exists(self, driver: webdriver.Chrome) -> bool:
+        """
+        Check if the page exists by looking for error banner.
+        
+        Returns:
+            True if page exists, False if error banner is found
+        """
+        try:
+            # Look for error banner with class "errorBannerTitle"
+            error_banner = driver.find_elements(By.CSS_SELECTOR, 'div.errorBannerTitle')
+            if error_banner:
+                error_text = error_banner[0].text.strip()
+                if "Sorry, the page doesn't exist" in error_text:
+                    return False
+            return True
+        except:
+            # If we can't check, assume page exists
+            return True
+    
     def scrape(self, url: str) -> Optional[Dict[str, Any]]:
         """
         Main method to scrape a scholarship page
@@ -805,6 +829,9 @@ class BigFutureScraper:
             
         Returns:
             Dictionary containing scholarship data, or None if scraping failed
+            
+        Raises:
+            PageNotFoundError: If the page doesn't exist (error banner found)
         """
         driver = None
         try:
@@ -814,6 +841,10 @@ class BigFutureScraper:
             
             # Wait for page to load
             time.sleep(3)
+            
+            # Check if page exists before proceeding
+            if not self._check_page_exists(driver):
+                raise PageNotFoundError(f"Page not found: {url}")
             
             # Expand all sections
             self._expand_all_sections(driver)
@@ -838,6 +869,9 @@ class BigFutureScraper:
             
             return scholarship_data
             
+        except PageNotFoundError:
+            # Re-raise PageNotFoundError so caller can handle it specially
+            raise
         except Exception as e:
             print(f"Error scraping with Selenium: {e}")
             import traceback

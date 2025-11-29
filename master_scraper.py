@@ -10,6 +10,7 @@ import time
 import re
 from pathlib import Path
 from scholarship_detail_scraper import ScholarshipDetailScraper
+from bigfuture_scraper import PageNotFoundError
 
 
 class MasterScraper:
@@ -182,6 +183,7 @@ class MasterScraper:
         processed = 0
         failed = 0
         skipped = []
+        page_not_found = []  # Track scholarships where page doesn't exist
         
         while True:
             # Get next unscraped scholarship
@@ -192,6 +194,7 @@ class MasterScraper:
                 print("All scholarships have been processed!")
                 print(f"Total processed: {processed}")
                 print(f"Total failed: {failed}")
+                print(f"Total page not found: {len(page_not_found)}")
                 print("=" * 70)
                 break
             
@@ -199,7 +202,7 @@ class MasterScraper:
             url = scholarship['URL']
             remaining = self.count_remaining()
             
-            print(f"[{processed + failed + 1}] Processing: {name[:60]}...")
+            print(f"[{processed + failed + len(page_not_found) + 1}] Processing: {name[:60]}...")
             print(f"    URL: {url}")
             print(f"    Remaining in queue: {remaining}")
             
@@ -212,6 +215,7 @@ class MasterScraper:
             
             success = False
             last_error = None
+            is_page_not_found = False
             
             for attempt in range(1, self.max_retries + 1):
                 print(f"    [SCRAPE] Attempt {attempt}/{self.max_retries}...")
@@ -235,6 +239,12 @@ class MasterScraper:
                     else:
                         last_error = "No data returned from scraper"
                         print(f"    ✗ Attempt {attempt} failed: {last_error}")
+                except PageNotFoundError as e:
+                    # Page doesn't exist - don't retry, just skip
+                    is_page_not_found = True
+                    last_error = "Page doesn't exist"
+                    print(f"    [SKIP] Page not found: {str(e)}")
+                    break
                 except Exception as e:
                     last_error = str(e)
                     import traceback
@@ -246,16 +256,26 @@ class MasterScraper:
                     time.sleep(delay)
             
             if not success:
-                failed += 1
-                skipped.append({
-                    'name': name,
-                    'url': url,
-                    'reason': last_error or 'Unknown error'
-                })
+                if is_page_not_found:
+                    # Track page not found separately
+                    page_not_found.append({
+                        'name': name,
+                        'url': url,
+                        'reason': 'Page does not exist'
+                    })
+                    print(f"    [SKIP] Page not found - marked as skipped in queue.")
+                else:
+                    failed += 1
+                    skipped.append({
+                        'name': name,
+                        'url': url,
+                        'reason': last_error or 'Unknown error'
+                    })
+                    print(f"    ✗ All {self.max_retries} attempts failed. Marked as skipped in queue.")
+                
                 # Mark as scraped in queue to prevent infinite retry loop
                 # (even though it failed, we don't want to keep trying it)
                 self.update_queue(url, is_scraped=True)
-                print(f"    ✗ All {self.max_retries} attempts failed. Marked as skipped in queue.")
             
             # Wait before next scholarship (only if success or finished retries)
             if remaining > 1:
@@ -267,14 +287,28 @@ class MasterScraper:
         print(f"\nScraping complete!")
         print(f"  Processed: {processed}")
         print(f"  Failed (skipped): {failed}")
-        print(f"  Total attempted: {processed + failed}")
+        print(f"  Page not found: {len(page_not_found)}")
+        print(f"  Total attempted: {processed + failed + len(page_not_found)}")
+        
+        if page_not_found:
+            print("\n" + "=" * 70)
+            print("SCHOLARSHIPS WITH PAGE NOT FOUND ERROR:")
+            print("=" * 70)
+            for item in page_not_found:
+                print(f"  - {item['name'][:60]}")
+                print(f"    URL: {item['url']}")
+                print(f"    Reason: {item['reason']}")
+                print()
         
         if skipped:
-            print("\nSkipped scholarships after retries:")
+            print("\n" + "=" * 70)
+            print("SKIPPED SCHOLARSHIPS (after retries):")
+            print("=" * 70)
             for item in skipped:
                 print(f"  - {item['name'][:60]} ({item['url']}) -> {item['reason']}")
         else:
-            print("\nNo scholarships were skipped!")
+            if not page_not_found:
+                print("\nNo scholarships were skipped!")
 
 
 if __name__ == '__main__':
