@@ -252,7 +252,10 @@ class MasterScraper:
                     'url': url,
                     'reason': last_error or 'Unknown error'
                 })
-                print(f"    ✗ All {self.max_retries} attempts failed. Moving on.")
+                # Mark as scraped in queue to prevent infinite retry loop
+                # (even though it failed, we don't want to keep trying it)
+                self.update_queue(url, is_scraped=True)
+                print(f"    ✗ All {self.max_retries} attempts failed. Marked as skipped in queue.")
             
             # Wait before next scholarship (only if success or finished retries)
             if remaining > 1:

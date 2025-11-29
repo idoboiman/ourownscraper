@@ -150,10 +150,57 @@ class BigFutureScraper:
     
     def _extract_foundation(self, driver: webdriver.Chrome) -> Optional[str]:
         """
-        Extract foundation/organization name.
+        Extract foundation/organization name using CSS class sc-c64e2d48-4.
         This should be the foundation or organization offering the scholarship,
         NOT the student's current school or grade level.
         """
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        
+        # Search by CSS class sc-c64e2d48-4 (similar to how name uses sc-c64e2d48-3)
+        selectors = [
+            (By.CSS_SELECTOR, '.sc-c64e2d48-4'),  # CSS class selector (any tag)
+            (By.CSS_SELECTOR, '[class="sc-c64e2d48-4"]'),  # Exact class attribute match
+            (By.CSS_SELECTOR, '[class*="sc-c64e2d48-4"]'),  # Contains class (handles multiple classes)
+            (By.CSS_SELECTOR, '.sc-c64e2d48-4.jJZZsb'),  # Both classes together
+            (By.CSS_SELECTOR, '[class*="sc-c64e2d48-4"][class*="jJZZsb"]'),  # Contains both classes
+            (By.XPATH, '//*[@class="sc-c64e2d48-4"]'),  # XPath exact class (any tag)
+            (By.XPATH, '//*[contains(@class, "sc-c64e2d48-4")]'),  # XPath with contains (any tag)
+        ]
+        
+        # First try with explicit wait
+        for by, selector in selectors:
+            try:
+                foundation_elem = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((by, selector))
+                )
+                foundation = foundation_elem.text.strip()
+                if foundation:
+                    return foundation
+            except:
+                continue
+        
+        # Fallback: try without wait (element might already be loaded)
+        for by, selector in selectors:
+            try:
+                foundation_elem = driver.find_element(by, selector)
+                foundation = foundation_elem.text.strip()
+                if foundation:
+                    return foundation
+            except:
+                continue
+        
+        # Last resort: try find_elements to see if any match
+        try:
+            elements = driver.find_elements(By.CSS_SELECTOR, '[class*="sc-c64e2d48-4"]')
+            for elem in elements:
+                foundation = elem.text.strip()
+                if foundation:
+                    return foundation
+        except:
+            pass
+        
+        # Final fallback: old text-based method
         try:
             # Get all text elements and look for organization-like names
             # Organization name is usually near the top, after the scholarship name
@@ -210,9 +257,8 @@ class BigFutureScraper:
                         return text
             except:
                 pass
-            
         except Exception as e:
-            print(f"Error extracting school/organization: {e}")
+            print(f"Error extracting foundation: {e}")
         
         return None
     
